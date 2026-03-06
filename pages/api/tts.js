@@ -1,3 +1,14 @@
+const DEFAULT_MODEL_ID = 'eleven_multilingual_v2'
+
+function normalizeModelId(rawValue) {
+  if (!rawValue || typeof rawValue !== 'string') return DEFAULT_MODEL_ID
+
+  const trimmed = rawValue.trim().replace(/^['"`]+|['"`]+$/g, '')
+  const firstToken = trimmed.match(/^[A-Za-z0-9_.-]+/)?.[0]
+
+  return firstToken || DEFAULT_MODEL_ID
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -5,7 +16,7 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.ELEVENLABS_API_KEY
   const voiceId = process.env.ELEVENLABS_VOICE_ID
-  const modelId = process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2'
+  const modelId = normalizeModelId(process.env.ELEVENLABS_MODEL_ID)
 
   if (!apiKey) {
     return res.status(500).json({ error: 'ELEVENLABS_API_KEY is not configured.' })

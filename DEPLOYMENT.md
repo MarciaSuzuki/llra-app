@@ -69,13 +69,14 @@ with **repo** scope checked.
    | `ANTHROPIC_API_KEY` | Your key from Step 1 |
    | `ELEVENLABS_API_KEY` | Your ElevenLabs API key |
    | `ELEVENLABS_VOICE_ID` | The ElevenLabs voice ID you want to use |
-   | `ELEVENLABS_MODEL_ID` | `eleven_multilingual_v2` (recommended) |
+   | `ELEVENLABS_MODEL_ID` | `eleven_multilingual_v2` |
    | `ADMIN_PASSWORD` | Choose a strong password for the admin dashboard |
    | `SESSION_SECRET` | Any long random string (e.g., `uofn-llra-secret-2024-xk9p2`) |
 
-6. Click **Deploy**
-7. Wait ~2 minutes for the build to complete
-8. Vercel gives you a URL like `https://llra-app-abc123.vercel.app`
+6. Use exact values only for IDs (no extra text like `(recommended)`).
+7. Click **Deploy**
+8. Wait ~2 minutes for the build to complete
+9. Vercel gives you a URL like `https://llra-app-abc123.vercel.app`
 
 ---
 
