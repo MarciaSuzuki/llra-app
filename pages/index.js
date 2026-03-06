@@ -1,163 +1,184 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter } from 'next/router'
 import Head from 'next/head'
 import { STORY_A, STORY_B } from '../lib/data'
+import { splitTextForTts, fetchTtsAudioBlob } from '../lib/tts-client'
 
 const STORY_META = {
   A: {
-    title: 'Story A: "The School of Fish That Forgot It Knew How to Swim"',
-    intro: 'Now listening to Story A. The School of Fish That Forgot It Knew How to Swim.',
+    key: 'A',
+    title: 'The School of Fish That Forgot It Knew How to Swim',
+    subtitle: 'Story A',
     text: STORY_A,
   },
   B: {
-    title: 'Story B: "The Porang Whisper"',
-    intro: 'Now listening to Story B. The Porang Whisper.',
+    key: 'B',
+    title: 'The Porang Whisper',
+    subtitle: 'Story B',
     text: STORY_B,
   },
 }
 
-function buildSpeechChunks(text, maxLength = 220) {
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  if (!normalized) return []
-
-  const sentenceParts = normalized.match(/[^.!?]+[.!?]*/g) || [normalized]
-  const chunks = []
-  let current = ''
-
-  for (const part of sentenceParts) {
-    const sentence = part.trim()
-    if (!sentence) continue
-
-    if ((current + ' ' + sentence).trim().length <= maxLength) {
-      current = (current + ' ' + sentence).trim()
-      continue
-    }
-
-    if (current) chunks.push(current)
-
-    if (sentence.length <= maxLength) {
-      current = sentence
-      continue
-    }
-
-    const words = sentence.split(' ')
-    let longChunk = ''
-
-    for (const word of words) {
-      if ((longChunk + ' ' + word).trim().length <= maxLength) {
-        longChunk = (longChunk + ' ' + word).trim()
-      } else {
-        if (longChunk) chunks.push(longChunk)
-        longChunk = word
-      }
-    }
-
-    current = longChunk
-  }
-
-  if (current) chunks.push(current)
-  return chunks
+function getStoryParagraphs(storyText) {
+  return storyText
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .filter((paragraph) => !/^Story\s+[AB]:/i.test(paragraph))
 }
 
 export default function Home() {
   const router = useRouter()
 
-  const [name, setName] = useState('')
-  const [inputMode, setInputMode] = useState(null)
-  const [loading, setLoading] = useState(false)
   const [step, setStep] = useState('welcome') // welcome | stories | mode | name
+  const [inputMode, setInputMode] = useState(null)
+  const [name, setName] = useState('')
+  const [loading, setLoading] = useState(false)
 
+  const [activeStoryKey, setActiveStoryKey] = useState('A')
   const [storyAReviewed, setStoryAReviewed] = useState(false)
   const [storyBReviewed, setStoryBReviewed] = useState(false)
   const [storyANotes, setStoryANotes] = useState('')
   const [storyBNotes, setStoryBNotes] = useState('')
 
-  const [speechOutputSupported, setSpeechOutputSupported] = useState(false)
   const [speechInputSupported, setSpeechInputSupported] = useState(false)
-  const [isSpeaking, setIsSpeaking] = useState(false)
-  const [playingStory, setPlayingStory] = useState(null)
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false)
+  const [playingStoryKey, setPlayingStoryKey] = useState(null)
+  const [audioError, setAudioError] = useState('')
 
-  const synthRef = useRef(null)
+  const audioElementRef = useRef(null)
+  const playbackIdRef = useRef(0)
+  const audioCacheRef = useRef(new Map())
+
+  const stories = useMemo(() => ({
+    A: { ...STORY_META.A, paragraphs: getStoryParagraphs(STORY_META.A.text) },
+    B: { ...STORY_META.B, paragraphs: getStoryParagraphs(STORY_META.B.text) },
+  }), [])
 
   const storiesReviewed = storyAReviewed && storyBReviewed
+  const activeStory = stories[activeStoryKey]
+  const activeStoryReviewed = activeStoryKey === 'A' ? storyAReviewed : storyBReviewed
+  const activeStoryNotes = activeStoryKey === 'A' ? storyANotes : storyBNotes
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-
-    const hasSpeechOutput = 'speechSynthesis' in window
     const hasSpeechInput = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window
-
-    setSpeechOutputSupported(hasSpeechOutput)
     setSpeechInputSupported(hasSpeechInput)
-
-    if (hasSpeechOutput) synthRef.current = window.speechSynthesis
   }, [])
 
-  const stopSpeaking = useCallback(() => {
-    synthRef.current?.cancel()
-    setIsSpeaking(false)
-    setPlayingStory(null)
+  const stopAudio = useCallback(() => {
+    playbackIdRef.current += 1
+
+    const activeAudio = audioElementRef.current
+    if (activeAudio) {
+      activeAudio.pause()
+      activeAudio.currentTime = 0
+      activeAudio.onended = null
+      activeAudio.onerror = null
+      activeAudio.onpause = null
+      audioElementRef.current = null
+    }
+
+    setIsPlayingAudio(false)
+    setPlayingStoryKey(null)
   }, [])
 
   useEffect(() => {
-    return () => stopSpeaking()
-  }, [stopSpeaking])
+    return () => {
+      stopAudio()
+      for (const objectUrl of audioCacheRef.current.values()) {
+        URL.revokeObjectURL(objectUrl)
+      }
+      audioCacheRef.current.clear()
+    }
+  }, [stopAudio])
 
-  const speakText = useCallback((text, storyKey = null) => {
-    if (!synthRef.current) return
+  const fetchChunkUrl = useCallback(async (chunk) => {
+    const cached = audioCacheRef.current.get(chunk)
+    if (cached) return cached
 
-    stopSpeaking()
+    const blob = await fetchTtsAudioBlob(chunk)
+    const objectUrl = URL.createObjectURL(blob)
+    audioCacheRef.current.set(chunk, objectUrl)
+    return objectUrl
+  }, [])
 
-    const chunks = buildSpeechChunks(text)
-    if (!chunks.length) return
-
-    setIsSpeaking(true)
-    setPlayingStory(storyKey)
-
-    let i = 0
-    const speakNext = () => {
-      const chunk = chunks[i]
-      if (!chunk) {
-        setIsSpeaking(false)
-        setPlayingStory(null)
+  const playChunkUrl = useCallback((url, playbackId) => {
+    return new Promise((resolve, reject) => {
+      if (playbackId !== playbackIdRef.current) {
+        resolve(false)
         return
       }
 
-      const utterance = new SpeechSynthesisUtterance(chunk)
-      utterance.rate = 0.95
-      utterance.pitch = 1.0
-      utterance.volume = 1.0
+      const audio = new Audio(url)
+      audioElementRef.current = audio
 
-      const voices = synthRef.current.getVoices()
-      const preferredVoice = voices.find((voice) =>
-        voice.name.includes('Samantha') ||
-        voice.name.includes('Google US English') ||
-        voice.name.includes('Karen') ||
-        voice.name.includes('Daniel') ||
-        voice.lang === 'en-US'
-      )
-      if (preferredVoice) utterance.voice = preferredVoice
-
-      utterance.onend = () => {
-        i += 1
-        speakNext()
+      let settled = false
+      const finish = (result, error = null) => {
+        if (settled) return
+        settled = true
+        audio.onended = null
+        audio.onerror = null
+        audio.onpause = null
+        if (error) {
+          reject(error)
+        } else {
+          resolve(result)
+        }
       }
 
-      utterance.onerror = () => {
-        setIsSpeaking(false)
-        setPlayingStory(null)
+      audio.onended = () => finish(true)
+      audio.onerror = () => finish(false, new Error('Unable to play generated audio.'))
+      audio.onpause = () => {
+        if (playbackId !== playbackIdRef.current) finish(false)
       }
 
-      synthRef.current.speak(utterance)
+      audio.play().catch(() => {
+        finish(false, new Error('Audio playback was blocked by the browser. Please tap Listen again.'))
+      })
+    })
+  }, [])
+
+  const playText = useCallback(async (text, storyKey = null) => {
+    stopAudio()
+    setAudioError('')
+
+    const playbackId = playbackIdRef.current
+    const chunks = splitTextForTts(text)
+    if (!chunks.length) return false
+
+    setIsPlayingAudio(true)
+    setPlayingStoryKey(storyKey)
+
+    try {
+      for (const chunk of chunks) {
+        if (playbackId !== playbackIdRef.current) return false
+        const chunkUrl = await fetchChunkUrl(chunk)
+        const played = await playChunkUrl(chunkUrl, playbackId)
+        if (!played) return false
+      }
+
+      if (playbackId === playbackIdRef.current) {
+        setIsPlayingAudio(false)
+        setPlayingStoryKey(null)
+      }
+      return true
+    } catch (error) {
+      if (playbackId === playbackIdRef.current) {
+        setIsPlayingAudio(false)
+        setPlayingStoryKey(null)
+        setAudioError(error.message || 'Audio playback failed.')
+      }
+      return false
     }
+  }, [fetchChunkUrl, playChunkUrl, stopAudio])
 
-    speakNext()
-  }, [stopSpeaking])
-
-  function playStory(storyKey) {
-    const story = STORY_META[storyKey]
+  async function playStoryAudio(storyKey) {
+    const story = stories[storyKey]
     if (!story) return
-    speakText(`${story.intro} ${story.text}`, storyKey)
+
+    const narration = `${story.subtitle}. ${story.title}. ${story.paragraphs.join(' ')}`
+    await playText(narration, storyKey)
   }
 
   async function startAssessment() {
@@ -165,40 +186,39 @@ export default function Home() {
 
     setLoading(true)
     try {
-      const res = await fetch('/api/sessions', {
+      const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create', studentName: name.trim(), inputMode }),
       })
 
-      const data = await res.json()
+      const data = await response.json()
       if (data.sessionId) {
         router.push(`/assessment?session=${data.sessionId}&mode=${inputMode}`)
       } else {
         setLoading(false)
       }
-    } catch (err) {
-      console.error(err)
+    } catch (error) {
+      console.error(error)
       setLoading(false)
     }
   }
 
-  const storyCards = [
-    {
-      key: 'A',
-      reviewed: storyAReviewed,
-      setReviewed: setStoryAReviewed,
-      notes: storyANotes,
-      setNotes: setStoryANotes,
-    },
-    {
-      key: 'B',
-      reviewed: storyBReviewed,
-      setReviewed: setStoryBReviewed,
-      notes: storyBNotes,
-      setNotes: setStoryBNotes,
-    },
-  ]
+  function setActiveStoryNotes(value) {
+    if (activeStoryKey === 'A') {
+      setStoryANotes(value)
+    } else {
+      setStoryBNotes(value)
+    }
+  }
+
+  function setReviewedForActiveStory(checked) {
+    if (activeStoryKey === 'A') {
+      setStoryAReviewed(checked)
+    } else {
+      setStoryBReviewed(checked)
+    }
+  }
 
   return (
     <>
@@ -208,15 +228,15 @@ export default function Home() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 
-      <div className="min-h-screen bg-navy-950 relative overflow-hidden flex items-center justify-center px-4 py-12">
+      <div className="min-h-screen bg-navy-950 relative overflow-hidden flex items-center justify-center px-4 py-10">
         <div className="absolute inset-0 pointer-events-none">
           <div
-            className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full"
+            className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[720px] h-[720px] rounded-full"
             style={{ background: 'radial-gradient(circle, rgba(201,168,76,0.07) 0%, transparent 70%)' }}
           />
         </div>
 
-        <div className={`relative z-10 w-full ${step === 'stories' ? 'max-w-6xl' : 'max-w-lg'}`}>
+        <div className={`relative z-10 w-full ${step === 'stories' ? 'max-w-5xl' : 'max-w-lg'}`}>
           <div
             className="rounded-2xl overflow-hidden"
             style={{
@@ -251,19 +271,19 @@ export default function Home() {
               {step === 'welcome' && (
                 <div className="message-enter text-center">
                   <p className="font-body text-parchment-100 text-lg leading-relaxed mb-6">
-                    This assessment measures how well you understood and can apply two stories.
+                    Before the test, you will prepare by studying two stories carefully.
                   </p>
+
                   <div
                     className="mb-6 p-4 rounded-xl text-left"
                     style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)' }}
                   >
-                    <p className="text-gold-400 text-sm font-mono mb-2">IMPORTANT - HOW THIS WORKS</p>
+                    <p className="text-gold-400 text-sm font-mono mb-2">ASSESSMENT PROCESS</p>
                     <ul className="space-y-2">
-                      <li className="text-parchment-100 text-sm">1. You must carefully study both stories first.</li>
-                      <li className="text-parchment-100 text-sm">2. Every assessment question is based on these two stories.</li>
-                      <li className="text-parchment-100 text-sm">3. You may listen to each story as many times as you need.</li>
-                      <li className="text-parchment-100 text-sm">4. You may read the stories and take notes before starting.</li>
-                      <li className="text-parchment-100 text-sm">5. During the test, questions can be listened to and answered by voice or text.</li>
+                      <li className="text-parchment-100 text-sm">1. Study both stories first. Every question in the test is based on these stories.</li>
+                      <li className="text-parchment-100 text-sm">2. You can read the stories and listen to them as many times as needed.</li>
+                      <li className="text-parchment-100 text-sm">3. You can take personal notes while preparing.</li>
+                      <li className="text-parchment-100 text-sm">4. During the assessment, you can listen to each question and answer by voice or text.</li>
                     </ul>
                   </div>
 
@@ -272,7 +292,7 @@ export default function Home() {
                     className="w-full py-4 rounded-xl font-body text-lg font-semibold transition-all duration-200 hover:brightness-110"
                     style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}
                   >
-                    Open Story Study Room
+                    Start Story Preparation
                   </button>
                 </div>
               )}
@@ -280,91 +300,131 @@ export default function Home() {
               {step === 'stories' && (
                 <div className="message-enter">
                   <div className="mb-5 rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(201,168,76,0.18)' }}>
-                    <p className="text-parchment-100 text-base font-semibold mb-1">Study both stories before the test</p>
+                    <p className="text-parchment-100 text-base font-semibold mb-1">Study room</p>
                     <p className="text-parchment-200 text-sm">
-                      Read each story carefully, listen as many times as needed, and write notes if helpful. You can only continue after marking both stories as reviewed.
+                      Read and listen carefully. You can replay each story as many times as needed. Mark both stories as reviewed to continue.
                     </p>
-                    {!speechOutputSupported && (
-                      <p className="mt-3 text-sm text-gold-400">
-                        Story audio playback is not available in this browser. Use Chrome, Edge, or Safari for full audio support.
-                      </p>
-                    )}
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {storyCards.map((card) => {
-                      const story = STORY_META[card.key]
-                      const isCurrentStoryPlaying = isSpeaking && playingStory === card.key
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {['A', 'B'].map((key) => {
+                      const isActive = activeStoryKey === key
+                      const isReviewed = key === 'A' ? storyAReviewed : storyBReviewed
+                      const story = stories[key]
 
                       return (
-                        <div
-                          key={card.key}
-                          className="rounded-xl p-4"
-                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(201,168,76,0.18)' }}
+                        <button
+                          key={key}
+                          onClick={() => {
+                            stopAudio()
+                            setActiveStoryKey(key)
+                          }}
+                          className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                          style={{
+                            background: isActive ? 'rgba(201,168,76,0.16)' : 'rgba(255,255,255,0.05)',
+                            border: isActive ? '1px solid rgba(201,168,76,0.45)' : '1px solid rgba(255,255,255,0.12)',
+                            color: isActive ? '#e8cc7a' : '#f5f0e6',
+                          }}
                         >
-                          <h2 className="text-parchment-100 font-display text-lg leading-snug mb-3">{story.title}</h2>
-
-                          <div className="flex gap-2 mb-3">
-                            <button
-                              onClick={() => playStory(card.key)}
-                              disabled={!speechOutputSupported}
-                              className="px-3 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-35"
-                              style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}
-                            >
-                              {isCurrentStoryPlaying ? 'Listening...' : 'Listen to Story'}
-                            </button>
-
-                            <button
-                              onClick={stopSpeaking}
-                              disabled={!isCurrentStoryPlaying}
-                              className="px-3 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-35"
-                              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f0e6' }}
-                            >
-                              Stop
-                            </button>
-                          </div>
-
-                          <div
-                            className="rounded-lg p-3 mb-3 max-h-56 overflow-y-auto text-sm leading-relaxed text-parchment-100"
-                            style={{ background: 'rgba(7, 13, 31, 0.55)', border: '1px solid rgba(255,255,255,0.08)' }}
-                          >
-                            {story.text}
-                          </div>
-
-                          <textarea
-                            value={card.notes}
-                            onChange={(e) => card.setNotes(e.target.value)}
-                            rows={3}
-                            placeholder="Optional notes for this story..."
-                            className="w-full px-3 py-2 mb-3 rounded-lg text-sm bg-transparent text-parchment-100 placeholder-navy-600 focus:outline-none resize-y"
-                            style={{ border: '1px solid rgba(201,168,76,0.2)', background: 'rgba(255,255,255,0.03)' }}
-                          />
-
-                          <label className="flex items-start gap-2 text-sm text-parchment-100">
-                            <input
-                              type="checkbox"
-                              checked={card.reviewed}
-                              onChange={(e) => card.setReviewed(e.target.checked)}
-                              className="mt-1"
-                            />
-                            I have carefully studied this story and I am ready for questions based on it.
-                          </label>
-                        </div>
+                          {story.subtitle} {isReviewed ? '(Reviewed)' : ''}
+                        </button>
                       )
                     })}
                   </div>
 
+                  <div className="rounded-xl p-5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(201,168,76,0.18)' }}>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                      <div>
+                        <p className="text-gold-400 text-xs font-mono tracking-wide uppercase">{activeStory.subtitle}</p>
+                        <h2 className="text-parchment-100 font-display text-2xl leading-snug">{activeStory.title}</h2>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => playStoryAudio(activeStoryKey)}
+                          disabled={isPlayingAudio && playingStoryKey === activeStoryKey}
+                          className="px-4 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-45"
+                          style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}
+                        >
+                          {isPlayingAudio && playingStoryKey === activeStoryKey ? 'Playing...' : 'Listen'}
+                        </button>
+                        <button
+                          onClick={stopAudio}
+                          disabled={!isPlayingAudio}
+                          className="px-4 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-45"
+                          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f0e6' }}
+                        >
+                          Stop
+                        </button>
+                      </div>
+                    </div>
+
+                    {audioError && (
+                      <div className="mb-4 p-3 rounded-lg text-sm text-gold-300" style={{ background: 'rgba(201,168,76,0.09)', border: '1px solid rgba(201,168,76,0.25)' }}>
+                        {audioError}
+                      </div>
+                    )}
+
+                    <article
+                      className="rounded-lg p-5 max-h-[360px] overflow-y-auto"
+                      style={{ background: 'rgba(7,13,31,0.55)', border: '1px solid rgba(255,255,255,0.08)' }}
+                    >
+                      <div className="space-y-5">
+                        {activeStory.paragraphs.map((paragraph, index) => (
+                          <p key={`${activeStory.key}-${index}`} className="text-[15px] leading-8 text-parchment-100">
+                            {paragraph}
+                          </p>
+                        ))}
+                      </div>
+                    </article>
+
+                    <div className="mt-4">
+                      <label className="block text-parchment-200 text-sm mb-2">Optional notes for {activeStory.subtitle}</label>
+                      <textarea
+                        value={activeStoryNotes}
+                        onChange={(e) => setActiveStoryNotes(e.target.value)}
+                        rows={3}
+                        placeholder="Write your notes here..."
+                        className="w-full px-3 py-2 rounded-lg text-sm bg-transparent text-parchment-100 placeholder-navy-600 focus:outline-none resize-y"
+                        style={{ border: '1px solid rgba(201,168,76,0.2)', background: 'rgba(255,255,255,0.03)' }}
+                      />
+                    </div>
+
+                    <label className="mt-4 flex items-start gap-2 text-sm text-parchment-100">
+                      <input
+                        type="checkbox"
+                        checked={activeStoryReviewed}
+                        onChange={(e) => setReviewedForActiveStory(e.target.checked)}
+                        className="mt-1"
+                      />
+                      I have carefully studied this story and I am ready to be assessed on it.
+                    </label>
+                  </div>
+
+                  <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f0e6' }}>
+                      Story A status: {storyAReviewed ? 'Reviewed' : 'Not reviewed yet'}
+                    </div>
+                    <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f0e6' }}>
+                      Story B status: {storyBReviewed ? 'Reviewed' : 'Not reviewed yet'}
+                    </div>
+                  </div>
+
                   <div className="flex flex-col sm:flex-row gap-3 mt-6">
                     <button
-                      onClick={() => setStep('welcome')}
+                      onClick={() => {
+                        stopAudio()
+                        setStep('welcome')
+                      }}
                       className="sm:w-auto w-full px-5 py-3 rounded-xl text-sm font-semibold"
                       style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#d5dbe7' }}
                     >
                       Back
                     </button>
+
                     <button
                       onClick={() => {
-                        stopSpeaking()
+                        stopAudio()
                         setStep('mode')
                       }}
                       disabled={!storiesReviewed}
@@ -381,7 +441,7 @@ export default function Home() {
                 <div className="message-enter">
                   <p className="font-display text-parchment-100 text-xl text-center mb-2">Choose your default answer mode</p>
                   <p className="text-parchment-200 text-center text-sm mb-6">
-                    Every question can be listened to. You can answer by voice or text, and switch during the assessment.
+                    Questions can be listened to during the test. You can answer by voice or text and switch modes later.
                   </p>
 
                   <div className="space-y-3">
@@ -395,17 +455,8 @@ export default function Home() {
                       className="w-full p-4 rounded-xl text-left transition-all duration-200 disabled:opacity-35"
                       style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.25)' }}
                     >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(201,168,76,0.15)' }}>
-                          <svg className="w-6 h-6 text-gold-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                          </svg>
-                        </div>
-                        <div>
-                          <p className="text-gold-300 font-semibold font-body text-lg">Speak my answers</p>
-                          <p className="text-parchment-200 text-sm">Use microphone input for answers.</p>
-                        </div>
-                      </div>
+                      <p className="text-gold-300 font-semibold font-body text-lg">Speak my answers</p>
+                      <p className="text-parchment-200 text-sm">Use the microphone to answer.</p>
                     </button>
 
                     <button
@@ -416,23 +467,14 @@ export default function Home() {
                       className="w-full p-4 rounded-xl text-left transition-all duration-200"
                       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)' }}
                     >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.05)' }}>
-                          <svg className="w-6 h-6 text-parchment-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
-                          </svg>
-                        </div>
-                        <div>
-                          <p className="text-parchment-100 font-semibold font-body text-lg">Type my answers</p>
-                          <p className="text-parchment-200 text-sm">Use keyboard input for answers.</p>
-                        </div>
-                      </div>
+                      <p className="text-parchment-100 font-semibold font-body text-lg">Type my answers</p>
+                      <p className="text-parchment-200 text-sm">Use the keyboard to answer.</p>
                     </button>
                   </div>
 
                   {!speechInputSupported && (
                     <p className="mt-4 text-sm text-gold-400 text-center">
-                      Voice answering is not available in this browser. You can continue in text mode.
+                      Voice input is not available in this browser. You can continue in text mode.
                     </p>
                   )}
 
@@ -441,7 +483,7 @@ export default function Home() {
                     className="mt-5 w-full py-3 rounded-xl font-body text-sm font-semibold"
                     style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#d5dbe7' }}
                   >
-                    Back to Story Study Room
+                    Back to Story Preparation
                   </button>
                 </div>
               )}
@@ -459,6 +501,7 @@ export default function Home() {
                     style={{ border: '1px solid rgba(201,168,76,0.3)', background: 'rgba(255,255,255,0.03)' }}
                     autoFocus
                   />
+
                   <button
                     onClick={startAssessment}
                     disabled={!name.trim() || loading}

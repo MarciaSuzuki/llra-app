@@ -1,22 +1,24 @@
 # Learning Level Readiness Assessment
 ### University of the Nations · YWAM
 
-A full-stack web application for assessing prospective graduate students using Revised Bloom's Taxonomy (Remember, Understand, Apply). Supports both **text** and **voice/audio** interaction — designed for candidates from oral cultures who may prefer to speak their answers aloud.
+A full-stack web application for assessing prospective graduate students using Revised Bloom's Taxonomy (Remember, Understand, Apply). Supports both **text** and **voice/audio** interaction, designed for candidates from oral cultures who may prefer to speak their answers aloud.
 
 ## Features
 
-- 🎙 **Full audio mode** — questions are read aloud, answers captured by microphone
-- ⌨ **Text mode** — traditional chat-based interface
-- 🔄 **Mode toggle** — switch between audio and text at any time
-- 🤖 **Three-agent AI system** — Assessment, Evaluation, and Report agents
-- 📊 **Admin dashboard** — view all sessions, scores, and AI-generated notes
-- 📱 **Mobile friendly** — works on phone browsers, no download required
+- Story preparation room with readable story layout, replayable narration, and optional notes
+- High-quality story/question audio via ElevenLabs
+- Text mode and voice-input mode for student answers
+- Mode toggle during the assessment
+- Three-agent AI system: Assessment, Evaluation, and Report agents
+- Admin dashboard for sessions, scores, and AI-generated notes
+- Mobile-friendly web experience (no app download)
 
 ## Tech Stack
 
 - **Framework**: Next.js 14
 - **AI**: Anthropic Claude (claude-sonnet-4)
-- **Audio**: Web Speech API (browser-native, no extra API keys)
+- **Audio output**: ElevenLabs Text-to-Speech API
+- **Audio input**: Browser Web Speech API
 - **Styling**: Tailwind CSS
 - **Deployment**: Vercel
 
@@ -43,8 +45,6 @@ npm run dev
 
 ## Audio Mode Notes
 
-Requires Chrome or Edge for full microphone support. Uses:
-- `SpeechRecognition` API for voice input
-- `SpeechSynthesis` API for voice output
-
-No third-party audio services required.
+- Story and question narration uses ElevenLabs.
+- Voice answer capture uses `SpeechRecognition` (best support in Chrome/Edge).
+- If voice input is not supported by the browser, the app falls back to text input.

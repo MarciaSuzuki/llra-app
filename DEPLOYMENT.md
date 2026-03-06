@@ -62,11 +62,14 @@ with **repo** scope checked.
 2. Click **Add New Project**
 3. Find and click **Import** next to `llra-app`
 4. Leave all build settings as default (Vercel detects Next.js automatically)
-5. Click **Environment Variables** and add these three:
+5. Click **Environment Variables** and add these five:
 
    | Name | Value |
    |------|-------|
    | `ANTHROPIC_API_KEY` | Your key from Step 1 |
+   | `ELEVENLABS_API_KEY` | Your ElevenLabs API key |
+   | `ELEVENLABS_VOICE_ID` | The ElevenLabs voice ID you want to use |
+   | `ELEVENLABS_MODEL_ID` | `eleven_multilingual_v2` (recommended) |
    | `ADMIN_PASSWORD` | Choose a strong password for the admin dashboard |
    | `SESSION_SECRET` | Any long random string (e.g., `uofn-llra-secret-2024-xk9p2`) |
 
@@ -105,17 +108,18 @@ https://your-url.vercel.app/admin
 
 ## Audio Mode — Browser Requirements
 
-The audio (voice) mode uses the browser's built-in Web Speech API.
+Story/question narration uses ElevenLabs high-quality TTS.
+Voice *input* (student speaking answers) uses the browser Web Speech API.
 
-| Browser | Speech Input | Speech Output |
-|---------|-------------|---------------|
+| Browser | Speech Input (answers) | Story/Question Audio |
+|---------|-------------------------|---------------------|
 | Chrome  | ✅ Full support | ✅ Full support |
 | Edge    | ✅ Full support | ✅ Full support |
-| Safari  | ✅ iOS/Mac supported | ✅ Supported |
-| Firefox | ❌ Not supported | ✅ Output only |
+| Safari  | ✅ iOS/Mac supported | ✅ Full support |
+| Firefox | ❌ Not supported | ✅ Full support |
 
-**Recommendation for oral culture candidates:** Use Chrome or Edge for best results.
-The app automatically detects browser support and hides the audio option if unavailable.
+**Recommendation:** Use Chrome or Edge for best overall experience.
+The app detects browser limitations and falls back to text input when needed.
 
 On **mobile** (iOS/Android), students must allow microphone access when prompted.
 The app works on mobile browsers — no app download required.
@@ -147,7 +151,9 @@ To make changes (e.g., add questions, update stories):
 → Check that `ANTHROPIC_API_KEY` is correctly set in Vercel environment variables.
 
 **Audio not working**
-→ Student must be on Chrome or Edge. Ask them to allow microphone access when prompted.
+→ Check `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` in Vercel.
+→ Verify the selected ElevenLabs voice is active and available in your account.
+→ For spoken answers, student must allow microphone access.
 → HTTPS is required for microphone access — Vercel provides this automatically.
 
 **Admin dashboard shows no sessions**
@@ -156,7 +162,7 @@ To make changes (e.g., add questions, update stories):
 
 **Build fails on Vercel**
 → Check the build log for errors. Most common cause: missing environment variables.
-→ Ensure all three environment variables are set before deploying.
+→ Ensure all five environment variables are set before deploying.
 
 ---
 
