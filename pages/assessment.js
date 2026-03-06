@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/router'
 import Head from 'next/head'
-import { ALL_QUESTIONS, QUESTIONS } from '../lib/data'
+import { ALL_QUESTIONS } from '../lib/data'
 
 const LEVEL_INTROS = {
   remember: {
@@ -37,13 +37,14 @@ export default function Assessment() {
   const [phase, setPhase] = useState('intro') // intro | question | thinking | feedback | complete
   const [messages, setMessages] = useState([])
   const [userInput, setUserInput] = useState('')
-  const [currentResponse, setCurrentResponse] = useState('')
   const [isListening, setIsListening] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
-  const [audioSupported, setAudioSupported] = useState(false)
+  const [speechOutputSupported, setSpeechOutputSupported] = useState(false)
+  const [speechInputSupported, setSpeechInputSupported] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [summaryData, setSummaryData] = useState(null)
-  const [levelTransition, setLevelTransition] = useState(null) // null | level name
+  const [currentQuestionText, setCurrentQuestionText] = useState('')
+  const [autoReadQuestions, setAutoReadQuestions] = useState(true)
 
   const recognitionRef = useRef(null)
   const synthRef = useRef(null)
@@ -60,15 +61,21 @@ export default function Assessment() {
     if (typeof window !== 'undefined') {
       const hasSpeech = 'speechSynthesis' in window
       const hasRecog = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window
-      setAudioSupported(hasSpeech && hasRecog)
+      setSpeechOutputSupported(hasSpeech)
+      setSpeechInputSupported(hasRecog)
       if (hasSpeech) synthRef.current = window.speechSynthesis
     }
   }, [])
 
   // ── Sync inputMode from query ──────────────────────────────────────────────
   useEffect(() => {
-    if (initialMode) setInputMode(initialMode)
-  }, [initialMode])
+    if (!initialMode) return
+    if (initialMode === 'audio' && !speechInputSupported) {
+      setInputMode('text')
+      return
+    }
+    setInputMode(initialMode)
+  }, [initialMode, speechInputSupported])
 
   // ── TTS: speak text ────────────────────────────────────────────────────────
   const speak = useCallback((text, onEnd) => {
@@ -123,6 +130,11 @@ export default function Assessment() {
     setIsListening(false)
   }, [])
 
+  const replayCurrentQuestion = useCallback(() => {
+    if (!currentQuestionText || !speechOutputSupported) return
+    speak(currentQuestionText)
+  }, [currentQuestionText, speechOutputSupported, speak])
+
   // ── Add a message to chat ──────────────────────────────────────────────────
   const addMessage = useCallback((role, content) => {
     setMessages(prev => [...prev, { role, content, id: Date.now() + Math.random() }])
@@ -133,12 +145,12 @@ export default function Assessment() {
     if (!sessionId || phase !== 'intro') return
     const intro = `Welcome! I am here to guide you through the assessment. We will go through three levels of questions — Remember, Understand, and Apply. I will ask one question at a time and give you brief feedback after each answer. Are you ready to begin?`
     addMessage('agent', intro)
-    if (inputMode === 'audio') {
+    if (speechOutputSupported && (inputMode === 'audio' || autoReadQuestions)) {
       setTimeout(() => speak(intro, () => setPhase('question')), 600)
     } else {
       setPhase('question')
     }
-  }, [sessionId]) // eslint-disable-line
+  }, [sessionId, phase, addMessage, speak, inputMode, speechOutputSupported, autoReadQuestions])
 
   // ── Ask the current question ───────────────────────────────────────────────
   useEffect(() => {
@@ -152,28 +164,27 @@ export default function Assessment() {
 
     // Show level transition card
     if (prevLevel !== currLevel && currentIndex > 0) {
-      setLevelTransition(currLevel)
       const info = LEVEL_INTROS[currLevel]
       const transMsg = `Now moving to ${info.title}. ${info.desc}`
       addMessage('level', transMsg)
-      if (inputMode === 'audio') {
+      if (speechOutputSupported && (inputMode === 'audio' || autoReadQuestions)) {
         speak(transMsg, () => {
-          setLevelTransition(null)
           askQuestion(question)
         })
       } else {
-        setTimeout(() => { setLevelTransition(null); askQuestion(question) }, 1800)
+        setTimeout(() => { askQuestion(question) }, 1800)
       }
     } else {
       askQuestion(question)
     }
-  }, [phase, currentIndex]) // eslint-disable-line
+  }, [phase, currentIndex, sessionId, addMessage, inputMode, speak, speechOutputSupported, autoReadQuestions]) // eslint-disable-line
 
   function askQuestion(question) {
     const prefix = `Question ${currentIndex + 1} of ${ALL_QUESTIONS.length}. `
     const fullText = prefix + question.text
+    setCurrentQuestionText(fullText)
     addMessage('question', fullText)
-    if (inputMode === 'audio') {
+    if (speechOutputSupported && (inputMode === 'audio' || autoReadQuestions)) {
       speak(fullText)
     } else {
       inputRef.current?.focus()
@@ -234,7 +245,7 @@ export default function Assessment() {
     addMessage('agent', agentText)
     setPhase('feedback')
 
-    if (inputMode === 'audio') {
+    if (speechOutputSupported && (inputMode === 'audio' || autoReadQuestions)) {
       speak(agentText, () => {
         if (isLast) {
           finishAssessment()
@@ -267,7 +278,7 @@ export default function Assessment() {
       const data = await res.json()
       setSummaryData(data)
       addMessage('agent', data.studentSummary)
-      if (inputMode === 'audio') speak(data.studentSummary)
+      if (speechOutputSupported && (inputMode === 'audio' || autoReadQuestions)) speak(data.studentSummary)
     } catch {
       addMessage('agent', 'Thank you for completing the assessment. Your results will be reviewed by the admissions team.')
     }
@@ -276,8 +287,6 @@ export default function Assessment() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   const progress = Math.round((currentIndex / ALL_QUESTIONS.length) * 100)
-  const currentLevel = getLevelForIndex(currentIndex)
-  const levelInfo = LEVEL_INTROS[currentLevel]
 
   return (
     <>
@@ -315,7 +324,7 @@ export default function Assessment() {
                 {[...Array(7)].map((_, i) => <div key={i} className="wave-bar" />)}
               </div>
             )}
-            {audioSupported && (
+            {speechInputSupported && (
               <button
                 onClick={() => { stopSpeaking(); stopListening(); setInputMode(m => m === 'audio' ? 'text' : 'audio') }}
                 title={inputMode === 'audio' ? 'Switch to text mode' : 'Switch to audio mode'}
@@ -427,7 +436,25 @@ export default function Assessment() {
           <div className="flex-shrink-0 px-4 pb-6 pt-3 max-w-2xl w-full mx-auto"
             style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
 
-            {inputMode === 'audio' ? (
+            {speechOutputSupported && currentQuestionText && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                <button
+                  onClick={replayCurrentQuestion}
+                  disabled={phase === 'thinking'}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-30"
+                  style={{ background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', color: '#e8cc7a' }}>
+                  Listen to current question
+                </button>
+                <button
+                  onClick={() => setAutoReadQuestions(enabled => !enabled)}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold transition-all"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f0e6' }}>
+                  {autoReadQuestions ? 'Auto-read: On' : 'Auto-read: Off'}
+                </button>
+              </div>
+            )}
+
+            {inputMode === 'audio' && speechInputSupported ? (
               /* ── AUDIO INPUT ── */
               <div className="flex flex-col items-center gap-3">
                 {isListening && (
@@ -481,38 +508,43 @@ export default function Assessment() {
                   )}
                 </div>
                 <p className="text-navy-600 text-xs font-mono">
-                  {isListening ? 'Listening… tap stop when done' : isSpeaking ? 'Please wait for the question…' : 'Tap microphone to speak your answer'}
+                  {isListening ? 'Listening... tap stop when done' : isSpeaking ? 'Please wait for the question...' : 'Tap microphone to speak your answer'}
                 </p>
               </div>
             ) : (
               /* ── TEXT INPUT ── */
-              <div className="flex gap-2">
-                <textarea
-                  ref={inputRef}
-                  value={userInput}
-                  onChange={e => setUserInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      if (phase === 'question' || phase === 'feedback') submitAnswer()
-                    }
-                  }}
-                  placeholder="Type your answer here… (Enter to submit)"
-                  disabled={phase === 'thinking'}
-                  rows={2}
-                  className="flex-1 px-4 py-3 rounded-xl font-body text-base bg-transparent text-parchment-100 placeholder-navy-600 focus:outline-none resize-none disabled:opacity-40 transition-all"
-                  style={{ border: '1px solid rgba(201,168,76,0.2)', background: 'rgba(255,255,255,0.03)' }}
-                />
-                <button
-                  onClick={() => submitAnswer()}
-                  disabled={phase === 'thinking' || !userInput.trim()}
-                  className="px-4 py-3 rounded-xl flex-shrink-0 transition-all disabled:opacity-30 hover:brightness-110"
-                  style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}>
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-                  </svg>
-                </button>
-              </div>
+              <>
+                {inputMode === 'audio' && !speechInputSupported && (
+                  <p className="mb-2 text-gold-400 text-xs font-mono">Voice input is not available in this browser. Switched to text input.</p>
+                )}
+                <div className="flex gap-2">
+                  <textarea
+                    ref={inputRef}
+                    value={userInput}
+                    onChange={e => setUserInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        if (phase === 'question' || phase === 'feedback') submitAnswer()
+                      }
+                    }}
+                    placeholder="Type your answer here... (Enter to submit)"
+                    disabled={phase === 'thinking'}
+                    rows={2}
+                    className="flex-1 px-4 py-3 rounded-xl font-body text-base bg-transparent text-parchment-100 placeholder-navy-600 focus:outline-none resize-none disabled:opacity-40 transition-all"
+                    style={{ border: '1px solid rgba(201,168,76,0.2)', background: 'rgba(255,255,255,0.03)' }}
+                  />
+                  <button
+                    onClick={() => submitAnswer()}
+                    disabled={phase === 'thinking' || !userInput.trim()}
+                    className="px-4 py-3 rounded-xl flex-shrink-0 transition-all disabled:opacity-30 hover:brightness-110"
+                    style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                    </svg>
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}
