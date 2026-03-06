@@ -105,13 +105,14 @@ export default function Assessment() {
     }
   }, [stopAudio, stopListening])
 
-  const fetchChunkUrl = useCallback(async (chunk) => {
-    const cached = audioCacheRef.current.get(chunk)
+  const fetchChunkUrl = useCallback(async (chunk, voicePreset = 'question') => {
+    const cacheKey = `${voicePreset}::${chunk}`
+    const cached = audioCacheRef.current.get(cacheKey)
     if (cached) return cached
 
-    const blob = await fetchTtsAudioBlob(chunk)
+    const blob = await fetchTtsAudioBlob(chunk, { voicePreset })
     const objectUrl = URL.createObjectURL(blob)
-    audioCacheRef.current.set(chunk, objectUrl)
+    audioCacheRef.current.set(cacheKey, objectUrl)
     return objectUrl
   }, [])
 
@@ -151,7 +152,8 @@ export default function Assessment() {
     })
   }, [])
 
-  const playText = useCallback(async (text) => {
+  const playText = useCallback(async (text, options = {}) => {
+    const voicePreset = options.voicePreset || 'question'
     stopAudio()
     setAudioError('')
 
@@ -161,10 +163,22 @@ export default function Assessment() {
 
     setIsPlayingAudio(true)
 
+    const chunkUrlPromises = new Array(chunks.length)
+    const prefetchAhead = 4
+    const ensurePrefetch = (index) => {
+      if (index < 0 || index >= chunks.length) return
+      if (chunkUrlPromises[index]) return
+      chunkUrlPromises[index] = fetchChunkUrl(chunks[index], voicePreset)
+    }
+
     try {
-      for (const chunk of chunks) {
+      for (let index = 0; index < chunks.length; index += 1) {
+        for (let next = index; next <= index + prefetchAhead; next += 1) {
+          ensurePrefetch(next)
+        }
+
         if (playbackId !== playbackIdRef.current) return false
-        const chunkUrl = await fetchChunkUrl(chunk)
+        const chunkUrl = await chunkUrlPromises[index]
         const played = await playChunkUrl(chunkUrl, playbackId)
         if (!played) return false
       }
@@ -188,7 +202,7 @@ export default function Assessment() {
 
   const replayCurrentQuestion = useCallback(async () => {
     if (!currentQuestionText) return
-    await playText(currentQuestionText)
+    await playText(currentQuestionText, { voicePreset: 'question' })
   }, [currentQuestionText, playText])
 
   const startListening = useCallback(() => {

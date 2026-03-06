@@ -9,14 +9,31 @@ function normalizeModelId(rawValue) {
   return firstToken || DEFAULT_MODEL_ID
 }
 
+function resolveVoiceId(voicePreset) {
+  const defaultVoice = process.env.ELEVENLABS_VOICE_ID
+  const storyAVoice = process.env.ELEVENLABS_VOICE_ID_STORY_A
+  const storyBVoice = process.env.ELEVENLABS_VOICE_ID_STORY_B
+  const questionVoice = process.env.ELEVENLABS_VOICE_ID_QUESTION
+
+  if (voicePreset === 'story_a') return storyAVoice || defaultVoice
+  if (voicePreset === 'story_b') return storyBVoice || defaultVoice
+  if (voicePreset === 'question') return questionVoice || defaultVoice
+  return defaultVoice
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
   const apiKey = process.env.ELEVENLABS_API_KEY
-  const voiceId = process.env.ELEVENLABS_VOICE_ID
   const modelId = normalizeModelId(process.env.ELEVENLABS_MODEL_ID)
+  const { text, voicePreset } = req.body || {}
+  const voiceId = resolveVoiceId(voicePreset)
+
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({ error: 'Text is required.' })
+  }
 
   if (!apiKey) {
     return res.status(500).json({ error: 'ELEVENLABS_API_KEY is not configured.' })
@@ -26,19 +43,13 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'ELEVENLABS_VOICE_ID is not configured.' })
   }
 
-  const { text } = req.body || {}
-
-  if (!text || typeof text !== 'string') {
-    return res.status(400).json({ error: 'Text is required.' })
-  }
-
   const cleanText = text.replace(/\s+/g, ' ').trim()
   if (!cleanText) {
     return res.status(400).json({ error: 'Text is empty.' })
   }
 
   try {
-    const elevenRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    const elevenRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?optimize_streaming_latency=1`, {
       method: 'POST',
       headers: {
         'xi-api-key': apiKey,

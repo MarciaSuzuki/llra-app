@@ -93,13 +93,14 @@ export default function Home() {
     }
   }, [stopAudio])
 
-  const fetchChunkUrl = useCallback(async (chunk) => {
-    const cached = audioCacheRef.current.get(chunk)
+  const fetchChunkUrl = useCallback(async (chunk, voicePreset = 'default') => {
+    const cacheKey = `${voicePreset}::${chunk}`
+    const cached = audioCacheRef.current.get(cacheKey)
     if (cached) return cached
 
-    const blob = await fetchTtsAudioBlob(chunk)
+    const blob = await fetchTtsAudioBlob(chunk, { voicePreset })
     const objectUrl = URL.createObjectURL(blob)
-    audioCacheRef.current.set(chunk, objectUrl)
+    audioCacheRef.current.set(cacheKey, objectUrl)
     return objectUrl
   }, [])
 
@@ -139,7 +140,9 @@ export default function Home() {
     })
   }, [])
 
-  const playText = useCallback(async (text, storyKey = null) => {
+  const playText = useCallback(async (text, options = {}) => {
+    const storyKey = options.storyKey || null
+    const voicePreset = options.voicePreset || 'default'
     stopAudio()
     setAudioError('')
 
@@ -150,10 +153,22 @@ export default function Home() {
     setIsPlayingAudio(true)
     setPlayingStoryKey(storyKey)
 
+    const chunkUrlPromises = new Array(chunks.length)
+    const prefetchAhead = 4
+    const ensurePrefetch = (index) => {
+      if (index < 0 || index >= chunks.length) return
+      if (chunkUrlPromises[index]) return
+      chunkUrlPromises[index] = fetchChunkUrl(chunks[index], voicePreset)
+    }
+
     try {
-      for (const chunk of chunks) {
+      for (let index = 0; index < chunks.length; index += 1) {
+        for (let next = index; next <= index + prefetchAhead; next += 1) {
+          ensurePrefetch(next)
+        }
+
         if (playbackId !== playbackIdRef.current) return false
-        const chunkUrl = await fetchChunkUrl(chunk)
+        const chunkUrl = await chunkUrlPromises[index]
         const played = await playChunkUrl(chunkUrl, playbackId)
         if (!played) return false
       }
@@ -178,7 +193,10 @@ export default function Home() {
     if (!story) return
 
     const narration = `${story.subtitle}. ${story.title}. ${story.paragraphs.join(' ')}`
-    await playText(narration, storyKey)
+    await playText(narration, {
+      storyKey,
+      voicePreset: storyKey === 'B' ? 'story_b' : 'story_a',
+    })
   }
 
   async function startAssessment() {

@@ -73,6 +73,11 @@ with **repo** scope checked.
    | `ADMIN_PASSWORD` | Choose a strong password for the admin dashboard |
    | `SESSION_SECRET` | Any long random string (e.g., `uofn-llra-secret-2024-xk9p2`) |
 
+   Optional voice overrides:
+   - `ELEVENLABS_VOICE_ID_STORY_B` → set this to a feminine voice ID for Story B
+   - `ELEVENLABS_VOICE_ID_STORY_A` → optional different voice for Story A
+   - `ELEVENLABS_VOICE_ID_QUESTION` → optional different voice for assessment questions
+
 6. Use exact values only for IDs (no extra text like `(recommended)`).
 7. Click **Deploy**
 8. Wait ~2 minutes for the build to complete
@@ -153,6 +158,7 @@ To make changes (e.g., add questions, update stories):
 
 **Audio not working**
 → Check `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` in Vercel.
+→ If Story B should use a feminine voice, set `ELEVENLABS_VOICE_ID_STORY_B`.
 → Verify the selected ElevenLabs voice is active and available in your account.
 → For spoken answers, student must allow microphone access.
 → HTTPS is required for microphone access — Vercel provides this automatically.
