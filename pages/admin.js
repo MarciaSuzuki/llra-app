@@ -175,14 +175,14 @@ export default function Admin() {
   if (!authed) {
     return (
       <>
-        <Head><title>Admin — LLRA</title></Head>
+        <Head><title>Admin - Graduate Readiness Assessment</title></Head>
         <div className="min-h-screen bg-navy-950 flex items-center justify-center px-4">
           <div className="w-full max-w-sm rounded-2xl overflow-hidden"
             style={{ background: 'linear-gradient(145deg, #1a2847, #0f1b35)', border: '1px solid rgba(201,168,76,0.2)', boxShadow: '0 32px 80px rgba(0,0,0,0.6)' }}>
             <div className="px-8 pt-8 pb-6 text-center" style={{ borderBottom: '1px solid rgba(201,168,76,0.1)' }}>
               <img src="/uofn-logo.png" alt="UofN" className="w-14 h-14 mx-auto mb-4 object-contain" style={{ filter: 'invert(1) sepia(1) saturate(0.5)' }} />
               <p className="text-gold-400 text-xs font-mono tracking-widest uppercase mb-1">Administrator Access</p>
-              <h1 className="font-display text-xl text-parchment-100">LLRA Dashboard</h1>
+              <h1 className="font-display text-xl text-parchment-100">Graduate Readiness Assessment Dashboard</h1>
             </div>
             <div className="px-8 py-6">
               <input
@@ -213,7 +213,7 @@ export default function Admin() {
 
   return (
     <>
-      <Head><title>Admin Dashboard — LLRA</title></Head>
+      <Head><title>Admin Dashboard - Graduate Readiness Assessment</title></Head>
       <div className="min-h-screen bg-navy-950">
         {/* Header */}
         <header className="px-6 py-4 flex items-center justify-between"
@@ -221,7 +221,7 @@ export default function Admin() {
           <div className="flex items-center gap-3">
             <img src="/uofn-logo.png" alt="UofN" className="w-8 h-8 object-contain" style={{ filter: 'invert(1) sepia(1) saturate(0.5)' }} />
             <div>
-              <p className="text-parchment-100 font-display text-base">LLRA Dashboard</p>
+              <p className="text-parchment-100 font-display text-base">Graduate Readiness Assessment Dashboard</p>
               <p className="text-navy-600 text-xs font-mono">University of the Nations</p>
             </div>
           </div>

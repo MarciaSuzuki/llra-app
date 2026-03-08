@@ -384,7 +384,7 @@ export default function Assessment() {
   return (
     <>
       <Head>
-        <title>Assessment - University of the Nations</title>
+        <title>Graduate Readiness Assessment - University of the Nations</title>
       </Head>
 
       <div className="min-h-screen bg-navy-950 flex flex-col">
@@ -401,7 +401,7 @@ export default function Assessment() {
         >
           <div className="flex items-center gap-3">
             <img src="/uofn-logo.png" alt="UofN" className="w-7 h-7 object-contain" style={{ filter: 'invert(1) sepia(1) saturate(0.5)' }} />
-            <span className="text-gold-400 font-mono text-xs hidden sm:block">LLRA · University of the Nations</span>
+            <span className="text-gold-400 font-mono text-xs hidden sm:block">Graduate Readiness Assessment · University of the Nations</span>
           </div>
 
           <div className="flex-1 mx-6 max-w-xs">

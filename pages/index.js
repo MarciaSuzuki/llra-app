@@ -241,7 +241,7 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>Learning Level Readiness Assessment - University of the Nations</title>
+        <title>Graduate Readiness Assessment - University of the Nations</title>
         <meta name="description" content="Graduate readiness assessment for the University of the Nations" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
@@ -279,7 +279,7 @@ export default function Home() {
               </div>
               <p className="text-gold-400 text-xs font-mono tracking-widest uppercase mb-2">University of the Nations - YWAM</p>
               <h1 className="font-display text-2xl text-parchment-100 leading-tight">
-                Learning Level
+                Graduate
                 <br />
                 Readiness Assessment
               </h1>

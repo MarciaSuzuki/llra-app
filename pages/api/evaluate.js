@@ -4,7 +4,7 @@ import { getLevelForQuestion } from '../../lib/data'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-const EVAL_SYSTEM = `You are the Evaluation Agent for the University of the Nations Learning Level Readiness Assessment. You evaluate student responses and return structured JSON only.
+const EVAL_SYSTEM = `You are the Evaluation Agent for the University of the Nations Graduate Readiness Assessment. You evaluate student responses and return structured JSON only.
 
 SCORING RUBRIC:
 - Score 0: Incorrect or off-topic. Response does not address the question.

@@ -1,5 +1,5 @@
-# LLRA App — Deployment Guide
-## University of the Nations · Learning Level Readiness Assessment
+# Graduate Readiness Assessment - Deployment Guide
+## University of the Nations · Graduate Readiness Assessment
 
 ---
 
@@ -8,7 +8,7 @@
 1. Go to https://console.anthropic.com
 2. Sign in or create an account
 3. Click **API Keys** in the left sidebar
-4. Click **Create Key**, name it "LLRA App", copy the key
+4. Click **Create Key**, name it "Graduate Readiness Assessment", copy the key
 5. Keep this key safe — you will need it in Step 4
 
 ---
@@ -41,7 +41,7 @@ git init
 git add .
 
 # First commit
-git commit -m "Initial commit — LLRA app v1.0"
+git commit -m "Initial commit - Graduate Readiness Assessment v1.0"
 
 # Add your GitHub repo as the destination
 git remote add origin YOUR_REPO_URL

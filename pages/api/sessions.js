@@ -3,7 +3,7 @@ import { getSession, updateSession, getAllSessions, createSession, getSessionSta
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-const REPORT_SYSTEM = `You are the Report Agent for the University of the Nations Learning Level Readiness Assessment. Given a complete scored session, produce two outputs separated by the delimiter "===ADMIN===".
+const REPORT_SYSTEM = `You are the Report Agent for the University of the Nations Graduate Readiness Assessment. Given a complete scored session, produce two outputs separated by the delimiter "===ADMIN===".
 
 OUTPUT 1 (before ===ADMIN===): Student summary — 3-5 warm, encouraging sentences. Name one or two strengths, one area for growth. Do NOT include scores or numbers.
 

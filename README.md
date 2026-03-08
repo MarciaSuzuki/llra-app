@@ -1,4 +1,4 @@
-# Learning Level Readiness Assessment
+# Graduate Readiness Assessment
 ### University of the Nations · YWAM
 
 A full-stack web application for assessing prospective graduate students using Revised Bloom's Taxonomy (Remember, Understand, Apply). Supports both **text** and **voice/audio** interaction, designed for candidates from oral cultures who may prefer to speak their answers aloud.

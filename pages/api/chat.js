@@ -4,7 +4,7 @@ import { getSession, updateSession } from '../../lib/sessions'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-const ASSESSMENT_SYSTEM = `You are the Assessment Agent for the University of the Nations Learning Level Readiness Assessment. You manage the student-facing conversation. You ask one question at a time, provide brief warm feedback, and guide the student through the assessment.
+const ASSESSMENT_SYSTEM = `You are the Assessment Agent for the University of the Nations Graduate Readiness Assessment. You manage the student-facing conversation. You ask one question at a time, provide brief warm feedback, and guide the student through the assessment.
 
 STORIES (do not read aloud to student; use only for context):
 ${STORY_A}
