@@ -7,6 +7,7 @@ A full-stack web application for assessing prospective graduate students using R
 
 - Story preparation room with readable story layout, replayable narration, and optional notes
 - High-quality story/question audio via ElevenLabs
+- Persistent session storage via Vercel Blob when configured
 - Text mode and voice-input mode for student answers
 - Mode toggle during the assessment
 - Three-agent AI system: Assessment, Evaluation, and Report agents
@@ -21,6 +22,7 @@ A full-stack web application for assessing prospective graduate students using R
 - **Audio input**: Browser Web Speech API
 - **Styling**: Tailwind CSS
 - **Deployment**: Vercel
+- **Persistence**: Vercel Blob (optional but recommended for production)
 
 ## Setup
 

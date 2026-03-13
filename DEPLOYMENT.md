@@ -61,11 +61,14 @@ with **repo** scope checked.
 1. Go to https://vercel.com and sign in with your GitHub account
 2. Click **Add New Project**
 3. Find and click **Import** next to `llra-app`
-4. Leave all build settings as default (Vercel detects Next.js automatically)
-5. Click **Environment Variables** and add these five:
+4. In Vercel, open the **Storage** tab and create a **Blob** store
+5. Connect that Blob store to this project so Vercel adds `BLOB_READ_WRITE_TOKEN`
+6. Leave all build settings as default (Vercel detects Next.js automatically)
+7. Click **Environment Variables** and add these values:
 
    | Name | Value |
    |------|-------|
+   | `BLOB_READ_WRITE_TOKEN` | Added automatically when the Blob store is connected |
    | `ANTHROPIC_API_KEY` | Your key from Step 1 |
    | `ELEVENLABS_API_KEY` | Your ElevenLabs API key |
    | `ELEVENLABS_VOICE_ID` | The ElevenLabs voice ID you want to use |
@@ -78,10 +81,10 @@ with **repo** scope checked.
    - `ELEVENLABS_VOICE_ID_STORY_A` → optional different voice for Story A
    - `ELEVENLABS_VOICE_ID_QUESTION` → optional different voice for assessment questions
 
-6. Use exact values only for IDs (no extra text like `(recommended)`).
-7. Click **Deploy**
-8. Wait ~2 minutes for the build to complete
-9. Vercel gives you a URL like `https://llra-app-abc123.vercel.app`
+8. Use exact values only for IDs (no extra text like `(recommended)`).
+9. Click **Deploy**
+10. Wait ~2 minutes for the build to complete
+11. Vercel gives you a URL like `https://llra-app-abc123.vercel.app`
 
 ---
 
@@ -144,7 +147,7 @@ To make changes (e.g., add questions, update stories):
 
 ## Important Notes
 
-- **Sessions are stored in memory** — they reset if the Vercel function restarts (usually after inactivity). For permanent storage, consider adding Vercel KV (free tier available) or Supabase. Contact your developer for this upgrade.
+- **Sessions persist across restarts when `BLOB_READ_WRITE_TOKEN` is configured**. Without Blob storage connected, the app falls back to in-memory sessions.
 - **API costs** — each assessment uses roughly 30–60 API calls. At current Anthropic pricing, one full assessment costs approximately $0.10–0.25 USD.
 - **Story content** — both stories are embedded in the code on the server side. They are not visible to students.
 - **Admin password** — stored as an environment variable, not in the code. Change it in Vercel dashboard → Settings → Environment Variables at any time.
@@ -164,12 +167,13 @@ To make changes (e.g., add questions, update stories):
 → HTTPS is required for microphone access — Vercel provides this automatically.
 
 **Admin dashboard shows no sessions**
-→ Sessions stored in memory reset on server restart. This is expected on the free Vercel plan.
-→ To persist sessions, upgrade to Vercel KV storage.
+→ Make sure a Vercel Blob store is connected to the project.
+→ Confirm `BLOB_READ_WRITE_TOKEN` exists in the project environment variables.
+→ Sessions completed before Blob was connected were only in memory and cannot be recovered after a restart.
 
 **Build fails on Vercel**
 → Check the build log for errors. Most common cause: missing environment variables.
-→ Ensure all five environment variables are set before deploying.
+→ Ensure the Blob store is connected and all required environment variables are set before deploying.
 
 ---
 

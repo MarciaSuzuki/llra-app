@@ -29,7 +29,7 @@ export default async function handler(req, res) {
 
   if (!sessionId) return res.status(400).json({ error: 'sessionId required' })
 
-  const session = getSession(sessionId)
+  const session = await getSession(sessionId)
   if (!session) return res.status(404).json({ error: 'Session not found' })
 
   const currentQuestion = ALL_QUESTIONS[questionIndex]

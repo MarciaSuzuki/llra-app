@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     if (password !== process.env.ADMIN_PASSWORD) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
-    const sessions = getAllSessions()
+    const sessions = await getAllSessions()
     return res.status(200).json({ sessions })
   }
 
@@ -28,14 +28,14 @@ export default async function handler(req, res) {
 
     if (action === 'create') {
       if (!studentName) return res.status(400).json({ error: 'studentName required' })
-      const session = createSession(studentName)
-      if (inputMode) updateSession(session.id, { inputMode })
+      const session = await createSession(studentName)
+      if (inputMode) await updateSession(session.id, { inputMode })
       return res.status(200).json({ sessionId: session.id })
     }
 
     if (action === 'complete') {
       if (!sessionId) return res.status(400).json({ error: 'sessionId required' })
-      const session = getSession(sessionId)
+      const session = await getSession(sessionId)
       if (!session) return res.status(404).json({ error: 'Session not found' })
 
       const stats = getSessionStats(session)
@@ -62,7 +62,7 @@ export default async function handler(req, res) {
         const studentSummary = parts[0]?.trim() || 'Assessment completed successfully.'
         const adminAnalysis = parts[1]?.trim() || 'No qualitative analysis generated.'
 
-        updateSession(sessionId, {
+        await updateSession(sessionId, {
           completedAt: new Date().toISOString(),
           status: 'completed',
           report: { studentSummary, adminAnalysis, stats },
@@ -71,14 +71,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ studentSummary, stats })
       } catch (err) {
         console.error('Report generation error:', err)
-        updateSession(sessionId, { completedAt: new Date().toISOString(), status: 'completed' })
+        await updateSession(sessionId, { completedAt: new Date().toISOString(), status: 'completed' })
         return res.status(200).json({ studentSummary: 'Thank you for completing the assessment. Your results will be reviewed by the admissions team.', stats })
       }
     }
 
     // GET session by ID
     if (action === 'get') {
-      const session = getSession(sessionId)
+      const session = await getSession(sessionId)
       if (!session) return res.status(404).json({ error: 'Session not found' })
       return res.status(200).json({ session })
     }

@@ -29,7 +29,7 @@ export default async function handler(req, res) {
 
   if (!sessionId || !questionId) return res.status(400).json({ error: 'sessionId and questionId required' })
 
-  const session = getSession(sessionId)
+  const session = await getSession(sessionId)
   if (!session) return res.status(404).json({ error: 'Session not found' })
 
   const level = getLevelForQuestion(questionId)
@@ -66,7 +66,7 @@ export default async function handler(req, res) {
     const updatedStudentFeedback = { ...session.studentFeedback, [questionId]: evaluation.studentFeedback }
     const updatedResponses = { ...session.responses, [questionId]: studentResponse }
 
-    updateSession(sessionId, {
+    await updateSession(sessionId, {
       scores: updatedScores,
       adminNotes: updatedAdminNotes,
       studentFeedback: updatedStudentFeedback,
