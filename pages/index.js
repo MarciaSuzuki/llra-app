@@ -1,36 +1,51 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { useRouter } from 'next/router'
 import Head from 'next/head'
-import { STORY_A, STORY_B } from '../lib/data'
-import { splitTextForTts, fetchTtsAudioBlob } from '../lib/tts-client'
-
-const STORY_META = {
-  A: {
-    key: 'A',
-    title: 'The School of Fish That Forgot It Knew How to Swim',
-    subtitle: 'Story A',
-    text: STORY_A,
-  },
-  B: {
-    key: 'B',
-    title: 'The Porang Whisper',
-    subtitle: 'Story B',
-    text: STORY_B,
-  },
-}
+import { useRouter } from 'next/router'
+import { getStories } from '../lib/data'
+import { DEFAULT_LANGUAGE, LANGUAGE_OPTIONS, getSupportedLanguage, getUiText } from '../lib/i18n'
+import { fetchTtsAudioBlob, splitTextForTts } from '../lib/tts-client'
 
 function getStoryParagraphs(storyText) {
   return storyText
     .split(/\n\s*\n/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
-    .filter((paragraph) => !/^Story\s+[AB]:/i.test(paragraph))
+}
+
+function LanguageSwitcher({ language, onChange, label }) {
+  return (
+    <div className="flex flex-col items-center gap-2 mb-6">
+      <p className="text-navy-600 text-[11px] font-mono tracking-widest uppercase">{label}</p>
+      <div
+        className="inline-flex rounded-full p-1"
+        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+      >
+        {LANGUAGE_OPTIONS.map((option) => {
+          const isActive = language === option.value
+          return (
+            <button
+              key={option.value}
+              onClick={() => onChange(option.value)}
+              className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+              style={{
+                background: isActive ? 'rgba(201,168,76,0.18)' : 'transparent',
+                color: isActive ? '#e8cc7a' : '#d5dbe7',
+              }}
+            >
+              {option.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 export default function Home() {
   const router = useRouter()
+  const [language, setLanguage] = useState(DEFAULT_LANGUAGE)
 
-  const [step, setStep] = useState('welcome') // welcome | stories | mode | name
+  const [step, setStep] = useState('welcome')
   const [inputMode, setInputMode] = useState(null)
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -50,15 +65,50 @@ export default function Home() {
   const playbackIdRef = useRef(0)
   const audioCacheRef = useRef(new Map())
 
-  const stories = useMemo(() => ({
-    A: { ...STORY_META.A, paragraphs: getStoryParagraphs(STORY_META.A.text) },
-    B: { ...STORY_META.B, paragraphs: getStoryParagraphs(STORY_META.B.text) },
-  }), [])
+  const text = getUiText(language)
+  const common = text.common
+  const indexText = text.index
+
+  const stories = useMemo(() => {
+    const source = getStories(language)
+    return {
+      A: { ...source.A, paragraphs: getStoryParagraphs(source.A.text) },
+      B: { ...source.B, paragraphs: getStoryParagraphs(source.B.text) },
+    }
+  }, [language])
 
   const storiesReviewed = storyAReviewed && storyBReviewed
   const activeStory = stories[activeStoryKey]
   const activeStoryReviewed = activeStoryKey === 'A' ? storyAReviewed : storyBReviewed
   const activeStoryNotes = activeStoryKey === 'A' ? storyANotes : storyBNotes
+
+  useEffect(() => {
+    if (!router.isReady || typeof window === 'undefined') return
+
+    const queryLanguage = Array.isArray(router.query.lang) ? router.query.lang[0] : router.query.lang
+    const storedLanguage = window.localStorage.getItem('gra-language')
+    const nextLanguage = getSupportedLanguage(queryLanguage || storedLanguage || DEFAULT_LANGUAGE)
+
+    setLanguage(nextLanguage)
+  }, [router.isReady, router.query.lang])
+
+  useEffect(() => {
+    if (!router.isReady || typeof window === 'undefined') return
+
+    window.localStorage.setItem('gra-language', language)
+
+    const queryLanguage = Array.isArray(router.query.lang) ? router.query.lang[0] : router.query.lang
+    if (queryLanguage !== language) {
+      router.replace(
+        {
+          pathname: router.pathname,
+          query: { ...router.query, lang: language },
+        },
+        undefined,
+        { shallow: true }
+      )
+    }
+  }, [language, router])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -82,6 +132,10 @@ export default function Home() {
     setIsPlayingAudio(false)
     setPlayingStoryKey(null)
   }, [])
+
+  useEffect(() => {
+    stopAudio()
+  }, [language, stopAudio])
 
   useEffect(() => {
     return () => {
@@ -140,14 +194,14 @@ export default function Home() {
     })
   }, [])
 
-  const playText = useCallback(async (text, options = {}) => {
+  const playText = useCallback(async (narrationText, options = {}) => {
     const storyKey = options.storyKey || null
     const voicePreset = options.voicePreset || 'default'
     stopAudio()
     setAudioError('')
 
     const playbackId = playbackIdRef.current
-    const chunks = splitTextForTts(text)
+    const chunks = splitTextForTts(narrationText)
     if (!chunks.length) return false
 
     setIsPlayingAudio(true)
@@ -207,12 +261,24 @@ export default function Home() {
       const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create', studentName: name.trim(), inputMode }),
+        body: JSON.stringify({
+          action: 'create',
+          studentName: name.trim(),
+          inputMode,
+          language,
+        }),
       })
 
       const data = await response.json()
       if (data.sessionId) {
-        router.push(`/assessment?session=${data.sessionId}&mode=${inputMode}`)
+        router.push({
+          pathname: '/assessment',
+          query: {
+            session: data.sessionId,
+            mode: inputMode,
+            lang: language,
+          },
+        })
       } else {
         setLoading(false)
       }
@@ -241,8 +307,8 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>Graduate Readiness Assessment - University of the Nations</title>
-        <meta name="description" content="Graduate readiness assessment for the University of the Nations" />
+        <title>{text.appName} - University of the Nations</title>
+        <meta name="description" content={text.description} />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 
@@ -277,31 +343,30 @@ export default function Home() {
                   />
                 </div>
               </div>
-              <p className="text-gold-400 text-xs font-mono tracking-widest uppercase mb-2">University of the Nations - YWAM</p>
+              <p className="text-gold-400 text-xs font-mono tracking-widest uppercase mb-2">{text.universityLabel}</p>
               <h1 className="font-display text-2xl text-parchment-100 leading-tight">
-                Graduate
-                <br />
-                Readiness Assessment
+                {text.appName}
               </h1>
             </div>
 
             <div className="px-8 py-8">
+              <LanguageSwitcher language={language} onChange={setLanguage} label={text.languageLabel} />
+
               {step === 'welcome' && (
                 <div className="message-enter text-center">
                   <p className="font-body text-parchment-100 text-lg leading-relaxed mb-6">
-                    Before the test, you will prepare by studying two stories carefully.
+                    {indexText.welcomeLead}
                   </p>
 
                   <div
                     className="mb-6 p-4 rounded-xl text-left"
                     style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)' }}
                   >
-                    <p className="text-gold-400 text-sm font-mono mb-2">ASSESSMENT PROCESS</p>
+                    <p className="text-gold-400 text-sm font-mono mb-2">{indexText.processTitle}</p>
                     <ul className="space-y-2">
-                      <li className="text-parchment-100 text-sm">1. Study both stories first. Every question in the test is based on these stories.</li>
-                      <li className="text-parchment-100 text-sm">2. You can read the stories and listen to them as many times as needed.</li>
-                      <li className="text-parchment-100 text-sm">3. You can take personal notes while preparing.</li>
-                      <li className="text-parchment-100 text-sm">4. During the assessment, you can listen to each question and answer by voice or text.</li>
+                      {indexText.processSteps.map((item, index) => (
+                        <li key={item} className="text-parchment-100 text-sm">{index + 1}. {item}</li>
+                      ))}
                     </ul>
                   </div>
 
@@ -310,7 +375,7 @@ export default function Home() {
                     className="w-full py-4 rounded-xl font-body text-lg font-semibold transition-all duration-200 hover:brightness-110"
                     style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}
                   >
-                    Start Story Preparation
+                    {indexText.startStoryPreparation}
                   </button>
                 </div>
               )}
@@ -318,10 +383,8 @@ export default function Home() {
               {step === 'stories' && (
                 <div className="message-enter">
                   <div className="mb-5 rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(201,168,76,0.18)' }}>
-                    <p className="text-parchment-100 text-base font-semibold mb-1">Study room</p>
-                    <p className="text-parchment-200 text-sm">
-                      Read and listen carefully. You can replay each story as many times as needed. Mark both stories as reviewed to continue.
-                    </p>
+                    <p className="text-parchment-100 text-base font-semibold mb-1">{indexText.studyRoomTitle}</p>
+                    <p className="text-parchment-200 text-sm">{indexText.studyRoomDescription}</p>
                   </div>
 
                   <div className="flex flex-wrap gap-2 mb-4">
@@ -344,7 +407,7 @@ export default function Home() {
                             color: isActive ? '#e8cc7a' : '#f5f0e6',
                           }}
                         >
-                          {story.subtitle} {isReviewed ? '(Reviewed)' : ''}
+                          {story.subtitle} {isReviewed ? `(${common.reviewed})` : ''}
                         </button>
                       )
                     })}
@@ -364,7 +427,7 @@ export default function Home() {
                           className="px-4 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-45"
                           style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}
                         >
-                          {isPlayingAudio && playingStoryKey === activeStoryKey ? 'Playing...' : 'Listen'}
+                          {isPlayingAudio && playingStoryKey === activeStoryKey ? common.playing : common.listen}
                         </button>
                         <button
                           onClick={stopAudio}
@@ -372,7 +435,7 @@ export default function Home() {
                           className="px-4 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-45"
                           style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f0e6' }}
                         >
-                          Stop
+                          {common.stop}
                         </button>
                       </div>
                     </div>
@@ -397,12 +460,12 @@ export default function Home() {
                     </article>
 
                     <div className="mt-4">
-                      <label className="block text-parchment-200 text-sm mb-2">Optional notes for {activeStory.subtitle}</label>
+                      <label className="block text-parchment-200 text-sm mb-2">{indexText.notesLabel(activeStory.subtitle)}</label>
                       <textarea
                         value={activeStoryNotes}
                         onChange={(e) => setActiveStoryNotes(e.target.value)}
                         rows={3}
-                        placeholder="Write your notes here..."
+                        placeholder={indexText.notesPlaceholder}
                         className="w-full px-3 py-2 rounded-lg text-sm bg-transparent text-parchment-100 placeholder-navy-600 focus:outline-none resize-y"
                         style={{ border: '1px solid rgba(201,168,76,0.2)', background: 'rgba(255,255,255,0.03)' }}
                       />
@@ -415,16 +478,16 @@ export default function Home() {
                         onChange={(e) => setReviewedForActiveStory(e.target.checked)}
                         className="mt-1"
                       />
-                      I have carefully studied this story and I am ready to be assessed on it.
+                      {indexText.readyCheckbox}
                     </label>
                   </div>
 
                   <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f0e6' }}>
-                      Story A status: {storyAReviewed ? 'Reviewed' : 'Not reviewed yet'}
+                      {indexText.storyStatus(stories.A.subtitle, storyAReviewed, common)}
                     </div>
                     <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f0e6' }}>
-                      Story B status: {storyBReviewed ? 'Reviewed' : 'Not reviewed yet'}
+                      {indexText.storyStatus(stories.B.subtitle, storyBReviewed, common)}
                     </div>
                   </div>
 
@@ -437,7 +500,7 @@ export default function Home() {
                       className="sm:w-auto w-full px-5 py-3 rounded-xl text-sm font-semibold"
                       style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#d5dbe7' }}
                     >
-                      Back
+                      {common.back}
                     </button>
 
                     <button
@@ -449,7 +512,7 @@ export default function Home() {
                       className="flex-1 py-3 rounded-xl font-body text-base font-semibold transition-all duration-200 disabled:opacity-40 hover:brightness-110"
                       style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}
                     >
-                      Continue to Response Mode
+                      {indexText.continueToMode}
                     </button>
                   </div>
                 </div>
@@ -457,10 +520,8 @@ export default function Home() {
 
               {step === 'mode' && (
                 <div className="message-enter">
-                  <p className="font-display text-parchment-100 text-xl text-center mb-2">Choose your default answer mode</p>
-                  <p className="text-parchment-200 text-center text-sm mb-6">
-                    Questions can be listened to during the test. You can answer by voice or text and switch modes later.
-                  </p>
+                  <p className="font-display text-parchment-100 text-xl text-center mb-2">{indexText.modeTitle}</p>
+                  <p className="text-parchment-200 text-center text-sm mb-6">{indexText.modeDescription}</p>
 
                   <div className="space-y-3">
                     <button
@@ -473,8 +534,8 @@ export default function Home() {
                       className="w-full p-4 rounded-xl text-left transition-all duration-200 disabled:opacity-35"
                       style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.25)' }}
                     >
-                      <p className="text-gold-300 font-semibold font-body text-lg">Speak my answers</p>
-                      <p className="text-parchment-200 text-sm">Use the microphone to answer.</p>
+                      <p className="text-gold-300 font-semibold font-body text-lg">{indexText.speakAnswers}</p>
+                      <p className="text-parchment-200 text-sm">{indexText.speakAnswersDescription}</p>
                     </button>
 
                     <button
@@ -485,15 +546,13 @@ export default function Home() {
                       className="w-full p-4 rounded-xl text-left transition-all duration-200"
                       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)' }}
                     >
-                      <p className="text-parchment-100 font-semibold font-body text-lg">Type my answers</p>
-                      <p className="text-parchment-200 text-sm">Use the keyboard to answer.</p>
+                      <p className="text-parchment-100 font-semibold font-body text-lg">{indexText.typeAnswers}</p>
+                      <p className="text-parchment-200 text-sm">{indexText.typeAnswersDescription}</p>
                     </button>
                   </div>
 
                   {!speechInputSupported && (
-                    <p className="mt-4 text-sm text-gold-400 text-center">
-                      Voice input is not available in this browser. You can continue in text mode.
-                    </p>
+                    <p className="mt-4 text-sm text-gold-400 text-center">{indexText.voiceUnavailable}</p>
                   )}
 
                   <button
@@ -501,20 +560,20 @@ export default function Home() {
                     className="mt-5 w-full py-3 rounded-xl font-body text-sm font-semibold"
                     style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#d5dbe7' }}
                   >
-                    Back to Story Preparation
+                    {indexText.backToStoryPreparation}
                   </button>
                 </div>
               )}
 
               {step === 'name' && (
                 <div className="message-enter">
-                  <p className="font-display text-parchment-100 text-xl text-center mb-6">What is your name?</p>
+                  <p className="font-display text-parchment-100 text-xl text-center mb-6">{indexText.nameTitle}</p>
                   <input
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && name.trim() && startAssessment()}
-                    placeholder="Enter your full name"
+                    placeholder={indexText.namePlaceholder}
                     className="w-full px-5 py-4 rounded-xl font-body text-lg bg-transparent text-parchment-100 placeholder-navy-600 focus:outline-none transition-all"
                     style={{ border: '1px solid rgba(201,168,76,0.3)', background: 'rgba(255,255,255,0.03)' }}
                     autoFocus
@@ -522,29 +581,22 @@ export default function Home() {
 
                   <button
                     onClick={startAssessment}
-                    disabled={!name.trim() || loading}
-                    className="mt-4 w-full py-4 rounded-xl font-body text-lg font-semibold transition-all duration-200 disabled:opacity-40 hover:brightness-110"
+                    disabled={loading || !name.trim()}
+                    className="mt-5 w-full py-4 rounded-xl font-body text-lg font-semibold transition-all duration-200 disabled:opacity-40 hover:brightness-110"
                     style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}
                   >
-                    {loading ? 'Starting...' : 'Begin Assessment ->'}
+                    {loading ? indexText.loadingAssessment : indexText.beginAssessment}
                   </button>
 
                   <button
                     onClick={() => setStep('mode')}
-                    className="mt-3 w-full py-3 rounded-xl font-body text-sm font-semibold"
+                    className="mt-4 w-full py-3 rounded-xl font-body text-sm font-semibold"
                     style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#d5dbe7' }}
                   >
-                    Back to Response Mode
+                    {common.back}
                   </button>
                 </div>
               )}
-            </div>
-
-            <div className="px-8 pb-6 text-center">
-              <p className="text-navy-600 text-xs font-mono">30 questions · ~40 minutes · Results reviewed by human administrator</p>
-              <button onClick={() => router.push('/admin')} className="mt-3 text-xs text-navy-600 hover:text-gold-500 transition-colors font-mono">
-                Administrator login {'->'}
-              </button>
             </div>
           </div>
         </div>

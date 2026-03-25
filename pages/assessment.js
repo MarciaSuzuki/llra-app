@@ -1,23 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useRouter } from 'next/router'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import Head from 'next/head'
-import { ALL_QUESTIONS } from '../lib/data'
-import { splitTextForTts, fetchTtsAudioBlob } from '../lib/tts-client'
-
-const LEVEL_INTROS = {
-  remember: {
-    title: 'Level 1 - Remember',
-    desc: 'Questions about what happened in Story A.',
-  },
-  understand: {
-    title: 'Level 2 - Understand',
-    desc: 'Questions about meaning and interpretation in Story A.',
-  },
-  apply: {
-    title: 'Level 3 - Apply',
-    desc: 'Questions connecting both stories.',
-  },
-}
+import { useRouter } from 'next/router'
+import { getAllQuestions } from '../lib/data'
+import { DEFAULT_LANGUAGE, SPEECH_RECOGNITION_LOCALES, getSupportedLanguage, getUiText } from '../lib/i18n'
+import { fetchTtsAudioBlob, splitTextForTts } from '../lib/tts-client'
 
 function getLevelForIndex(index) {
   if (index < 10) return 'remember'
@@ -29,9 +15,11 @@ export default function Assessment() {
   const router = useRouter()
   const { session: sessionId, mode: initialMode } = router.query
 
+  const [language, setLanguage] = useState(DEFAULT_LANGUAGE)
+  const [languageReady, setLanguageReady] = useState(false)
   const [inputMode, setInputMode] = useState(initialMode || 'text')
   const [currentIndex, setCurrentIndex] = useState(0)
-  const [phase, setPhase] = useState('intro') // intro | question | thinking | feedback | complete
+  const [phase, setPhase] = useState('intro')
   const [messages, setMessages] = useState([])
   const [userInput, setUserInput] = useState('')
   const [isListening, setIsListening] = useState(false)
@@ -54,6 +42,11 @@ export default function Assessment() {
   const introStartedRef = useRef(false)
   const questionPromptedRef = useRef('')
 
+  const text = getUiText(language)
+  const assessmentText = text.assessment
+  const questions = useMemo(() => getAllQuestions(language), [language])
+  const levelIntros = assessmentText.levelIntros
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, phase])
@@ -63,6 +56,35 @@ export default function Assessment() {
     const hasRecog = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window
     setSpeechInputSupported(hasRecog)
   }, [])
+
+  useEffect(() => {
+    if (!router.isReady || typeof window === 'undefined') return
+
+    const queryLanguage = Array.isArray(router.query.lang) ? router.query.lang[0] : router.query.lang
+    const storedLanguage = window.localStorage.getItem('gra-language')
+    const nextLanguage = getSupportedLanguage(queryLanguage || storedLanguage || DEFAULT_LANGUAGE)
+
+    setLanguage(nextLanguage)
+    setLanguageReady(true)
+  }, [router.isReady, router.query.lang])
+
+  useEffect(() => {
+    if (!router.isReady || typeof window === 'undefined' || !languageReady) return
+
+    window.localStorage.setItem('gra-language', language)
+
+    const queryLanguage = Array.isArray(router.query.lang) ? router.query.lang[0] : router.query.lang
+    if (queryLanguage !== language) {
+      router.replace(
+        {
+          pathname: router.pathname,
+          query: { ...router.query, lang: language },
+        },
+        undefined,
+        { shallow: true }
+      )
+    }
+  }, [language, languageReady, router])
 
   useEffect(() => {
     if (!initialMode) return
@@ -152,13 +174,13 @@ export default function Assessment() {
     })
   }, [])
 
-  const playText = useCallback(async (text, options = {}) => {
+  const playText = useCallback(async (narrationText, options = {}) => {
     const voicePreset = options.voicePreset || 'question'
     stopAudio()
     setAudioError('')
 
     const playbackId = playbackIdRef.current
-    const chunks = splitTextForTts(text)
+    const chunks = splitTextForTts(narrationText)
     if (!chunks.length) return false
 
     setIsPlayingAudio(true)
@@ -212,7 +234,7 @@ export default function Assessment() {
     const recognition = new SpeechRec()
     recognition.continuous = false
     recognition.interimResults = true
-    recognition.lang = 'en-US'
+    recognition.lang = SPEECH_RECOGNITION_LOCALES[language] || SPEECH_RECOGNITION_LOCALES.en
     recognitionRef.current = recognition
 
     recognition.onstart = () => setIsListening(true)
@@ -224,21 +246,19 @@ export default function Assessment() {
     recognition.onend = () => setIsListening(false)
     recognition.onerror = () => setIsListening(false)
     recognition.start()
-  }, [])
+  }, [language])
 
   useEffect(() => {
-    if (!sessionId || phase !== 'intro' || introStartedRef.current) return
+    if (!sessionId || phase !== 'intro' || introStartedRef.current || !languageReady) return
 
     introStartedRef.current = true
-
-    const intro = 'Welcome. We will go through three levels of questions: Remember, Understand, and Apply. Each question is grounded in the two stories you prepared. You may listen to each question and answer by voice or text.'
 
     let cancelled = false
 
     const runIntro = async () => {
-      addMessage('agent', intro)
+      addMessage('agent', assessmentText.intro)
       if (autoReadQuestions) {
-        await playText(intro)
+        await playText(assessmentText.intro)
       }
       if (!cancelled) {
         setPhase('question')
@@ -250,26 +270,26 @@ export default function Assessment() {
     return () => {
       cancelled = true
     }
-  }, [sessionId, phase, addMessage, autoReadQuestions, playText])
+  }, [sessionId, phase, languageReady, addMessage, assessmentText.intro, autoReadQuestions, playText])
 
   useEffect(() => {
-    if (phase !== 'question' || !sessionId) return
+    if (phase !== 'question' || !sessionId || !languageReady) return
 
-    const cycleKey = `${sessionId}:${currentIndex}`
+    const cycleKey = `${sessionId}:${currentIndex}:${language}`
     if (questionPromptedRef.current === cycleKey) return
     questionPromptedRef.current = cycleKey
 
     let cancelled = false
 
     const runQuestionStep = async () => {
-      const question = ALL_QUESTIONS[currentIndex]
+      const question = questions[currentIndex]
       if (!question) return
 
       const previousLevel = currentIndex > 0 ? getLevelForIndex(currentIndex - 1) : null
       const currentLevel = getLevelForIndex(currentIndex)
 
       if (previousLevel !== currentLevel && currentIndex > 0) {
-        const transition = `Now moving to ${LEVEL_INTROS[currentLevel].title}. ${LEVEL_INTROS[currentLevel].desc}`
+        const transition = assessmentText.moveToLevel(levelIntros[currentLevel].title, levelIntros[currentLevel].desc)
         addMessage('level', transition)
         if (autoReadQuestions) {
           await playText(transition)
@@ -277,8 +297,7 @@ export default function Assessment() {
         }
       }
 
-      const prefix = `Question ${currentIndex + 1} of ${ALL_QUESTIONS.length}. `
-      const questionText = `${prefix}${question.text}`
+      const questionText = `${assessmentText.questionPrefix(currentIndex + 1, questions.length)}${question.text}`
       setCurrentQuestionText(questionText)
       addMessage('question', questionText)
 
@@ -294,7 +313,7 @@ export default function Assessment() {
     return () => {
       cancelled = true
     }
-  }, [phase, sessionId, currentIndex, addMessage, autoReadQuestions, playText])
+  }, [phase, sessionId, currentIndex, language, languageReady, questions, addMessage, assessmentText, levelIntros, autoReadQuestions, playText])
 
   async function finishAssessment() {
     setPhase('thinking')
@@ -303,7 +322,7 @@ export default function Assessment() {
       const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'complete', sessionId }),
+        body: JSON.stringify({ action: 'complete', sessionId, language }),
       })
       const data = await response.json()
 
@@ -313,10 +332,9 @@ export default function Assessment() {
         await playText(data.studentSummary)
       }
     } catch {
-      const fallback = 'Thank you for completing the assessment. Your results will be reviewed by the admissions team.'
-      addMessage('agent', fallback)
+      addMessage('agent', assessmentText.finishFallback)
       if (autoReadQuestions) {
-        await playText(fallback)
+        await playText(assessmentText.finishFallback)
       }
     }
 
@@ -324,14 +342,14 @@ export default function Assessment() {
   }
 
   async function submitAnswer(answerText) {
-    const text = answerText || userInput
-    if (!text.trim() && text !== '') return
+    const textInput = answerText ?? userInput
+    if (!textInput.trim() && textInput !== '') return
 
-    const question = ALL_QUESTIONS[currentIndex]
+    const question = questions[currentIndex]
     stopAudio()
     stopListening()
 
-    addMessage('student', text || '(no response)')
+    addMessage('student', textInput || '(no response)')
     setUserInput('')
     setTranscript('')
     setPhase('thinking')
@@ -346,21 +364,22 @@ export default function Assessment() {
           questionId: question.id,
           questionText: question.text,
           expectedElements: question.expectedElements,
-          studentResponse: text,
+          studentResponse: textInput,
+          language,
         }),
       })
       evaluation = await response.json()
     } catch {
-      evaluation = { score: 0, studentFeedback: 'Thank you for your answer.' }
+      evaluation = { score: 0, studentFeedback: assessmentText.thankYouAnswer }
     }
 
-    const isLast = currentIndex >= ALL_QUESTIONS.length - 1
+    const isLast = currentIndex >= questions.length - 1
 
-    let agentText = evaluation.studentFeedback || 'Thank you for your answer.'
+    let agentText = evaluation.studentFeedback || assessmentText.thankYouAnswer
     if (isLast) {
-      agentText += ' That was the final question. Well done for completing the assessment.'
+      agentText += assessmentText.finalQuestionDone
     } else {
-      agentText += ' Thank you. We will continue with the next question.'
+      agentText += assessmentText.continueNext
     }
 
     addMessage('agent', agentText)
@@ -379,12 +398,13 @@ export default function Assessment() {
     setPhase('question')
   }
 
-  const progress = Math.round((currentIndex / ALL_QUESTIONS.length) * 100)
+  const progress = Math.round((currentIndex / questions.length) * 100)
+  const languageLabel = language === 'pt' ? 'Português' : 'English'
 
   return (
     <>
       <Head>
-        <title>Graduate Readiness Assessment - University of the Nations</title>
+        <title>{text.appName} - University of the Nations</title>
       </Head>
 
       <div className="min-h-screen bg-navy-950 flex flex-col">
@@ -401,12 +421,15 @@ export default function Assessment() {
         >
           <div className="flex items-center gap-3">
             <img src="/uofn-logo.png" alt="UofN" className="w-7 h-7 object-contain" style={{ filter: 'invert(1) sepia(1) saturate(0.5)' }} />
-            <span className="text-gold-400 font-mono text-xs hidden sm:block">Graduate Readiness Assessment · University of the Nations</span>
+            <div className="hidden sm:block">
+              <span className="text-gold-400 font-mono text-xs block">{text.appNameShort} · University of the Nations</span>
+              <span className="text-navy-600 font-mono text-[10px] uppercase tracking-widest">{text.languageLabel}: {languageLabel}</span>
+            </div>
           </div>
 
           <div className="flex-1 mx-6 max-w-xs">
             <div className="flex justify-between text-xs text-navy-600 font-mono mb-1">
-              <span>{phase !== 'complete' ? `Q${currentIndex + 1}/${ALL_QUESTIONS.length}` : 'Complete'}</span>
+              <span>{phase !== 'complete' ? assessmentText.questionCounter(currentIndex + 1, questions.length) : assessmentText.complete}</span>
               <span>{phase === 'complete' ? 100 : progress}%</span>
             </div>
             <div className="h-1 rounded-full" style={{ background: 'rgba(255,255,255,0.07)' }}>
@@ -436,7 +459,7 @@ export default function Assessment() {
                   stopListening()
                   setInputMode((mode) => (mode === 'audio' ? 'text' : 'audio'))
                 }}
-                title={inputMode === 'audio' ? 'Switch to text mode' : 'Switch to voice mode'}
+                title={inputMode === 'audio' ? assessmentText.switchToTextMode : assessmentText.switchToVoiceMode}
                 className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
                 style={{
                   background: inputMode === 'audio' ? 'rgba(201,168,76,0.15)' : 'rgba(255,255,255,0.05)',
@@ -533,7 +556,7 @@ export default function Assessment() {
 
           {phase === 'complete' && summaryData && (
             <div className="message-enter mt-4 p-5 rounded-2xl text-center" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)' }}>
-              <p className="text-gold-400 font-mono text-xs mb-3">ASSESSMENT COMPLETE</p>
+              <p className="text-gold-400 font-mono text-xs mb-3">{assessmentText.assessmentComplete}</p>
               {summaryData.stats && (
                 <div className="flex justify-center gap-4 mb-4">
                   {Object.entries(summaryData.stats.byLevel).map(([level, data]) => (
@@ -542,12 +565,12 @@ export default function Assessment() {
                         {data.score}
                         <span className="text-navy-600 text-sm">/{data.max}</span>
                       </p>
-                      <p className="text-parchment-200 text-xs capitalize">{level}</p>
+                      <p className="text-parchment-200 text-xs capitalize">{text.levels[level]}</p>
                     </div>
                   ))}
                 </div>
               )}
-              <p className="text-parchment-200 text-sm">Your results will be reviewed by the admissions team. Thank you for your time.</p>
+              <p className="text-parchment-200 text-sm">{assessmentText.resultsReviewed}</p>
             </div>
           )}
 
@@ -564,7 +587,7 @@ export default function Assessment() {
                   className="px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-30"
                   style={{ background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', color: '#e8cc7a' }}
                 >
-                  Listen to current question
+                  {assessmentText.listenCurrentQuestion}
                 </button>
 
                 <button
@@ -572,7 +595,7 @@ export default function Assessment() {
                   className="px-3 py-2 rounded-lg text-xs font-semibold transition-all"
                   style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f0e6' }}
                 >
-                  {autoReadQuestions ? 'Auto-read: On' : 'Auto-read: Off'}
+                  {autoReadQuestions ? assessmentText.autoReadOn : assessmentText.autoReadOff}
                 </button>
               </div>
             )}
@@ -630,7 +653,7 @@ export default function Assessment() {
                       className="px-5 py-3 rounded-xl font-body text-sm font-semibold transition-all disabled:opacity-30 hover:brightness-110"
                       style={{ background: 'linear-gradient(135deg, #c9a84c, #a8872e)', color: '#060d1f' }}
                     >
-                      Submit Answer {'->'}
+                      {assessmentText.submitAnswer}
                     </button>
                   )}
 
@@ -640,19 +663,19 @@ export default function Assessment() {
                       className="px-4 py-2 rounded-lg text-xs font-mono text-navy-600 hover:text-parchment-200 transition-colors"
                       style={{ border: '1px solid rgba(255,255,255,0.06)' }}
                     >
-                      Skip
+                      {assessmentText.skip}
                     </button>
                   )}
                 </div>
 
                 <p className="text-navy-600 text-xs font-mono">
-                  {isListening ? 'Listening... tap stop when done' : isPlayingAudio ? 'Please wait for audio...' : 'Tap microphone to speak your answer'}
+                  {isListening ? assessmentText.listeningNow : isPlayingAudio ? assessmentText.waitForAudio : assessmentText.tapMic}
                 </p>
               </div>
             ) : (
               <>
                 {inputMode === 'audio' && !speechInputSupported && (
-                  <p className="mb-2 text-gold-400 text-xs font-mono">Voice input is not available in this browser. Switched to text input.</p>
+                  <p className="mb-2 text-gold-400 text-xs font-mono">{assessmentText.voiceUnavailableSwitched}</p>
                 )}
 
                 <div className="flex gap-2">
@@ -666,7 +689,7 @@ export default function Assessment() {
                         if (phase === 'question' || phase === 'feedback') submitAnswer()
                       }
                     }}
-                    placeholder="Type your answer here... (Enter to submit)"
+                    placeholder={assessmentText.typeAnswerPlaceholder}
                     disabled={phase === 'thinking'}
                     rows={2}
                     className="flex-1 px-4 py-3 rounded-xl font-body text-base bg-transparent text-parchment-100 placeholder-navy-600 focus:outline-none resize-none disabled:opacity-40 transition-all"

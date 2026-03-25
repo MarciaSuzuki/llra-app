@@ -1,13 +1,26 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { getSession, updateSession } from '../../lib/sessions'
 import { getLevelForQuestion } from '../../lib/data'
+import { getUiText, getSupportedLanguage } from '../../lib/i18n'
+import { getSession, updateSession } from '../../lib/sessions'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-const EVAL_SYSTEM = `You are the Evaluation Agent for the University of the Nations Graduate Readiness Assessment. You evaluate student responses and return structured JSON only.
+function getLanguageName(language) {
+  return language === 'pt' ? 'Brazilian Portuguese' : 'English'
+}
+
+function buildEvalSystem(language) {
+  const languageName = getLanguageName(language)
+
+  return `You are the Evaluation Agent for the University of the Nations Graduate Readiness Assessment. You evaluate student responses and return structured JSON only.
+
+LANGUAGE:
+- The student session language is ${languageName}.
+- The student may still answer in either English or Portuguese. Evaluate meaning, not exact wording.
+- Return both studentFeedback and adminNote in ${languageName}.
 
 SCORING RUBRIC:
-- Score 0: Incorrect or off-topic. Response does not address the question.
+- Score 0: Incorrect, blank, or off-topic. Response does not address the question.
 - Score 1: Partial. Captures some key elements but misses others, or is vague.
 - Score 2: Complete. Accurately addresses the core of the question.
 
@@ -21,24 +34,27 @@ OUTPUT: Return ONLY valid JSON, no preamble, no markdown.
   "studentFeedback": "one warm brief sentence for the student",
   "adminNote": "one sentence on reasoning quality for the administrator"
 }`
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { sessionId, questionId, questionText, expectedElements, studentResponse } = req.body
+  const { sessionId, questionId, questionText, expectedElements, studentResponse, language: requestedLanguage } = req.body
 
   if (!sessionId || !questionId) return res.status(400).json({ error: 'sessionId and questionId required' })
 
   const session = await getSession(sessionId)
   if (!session) return res.status(404).json({ error: 'Session not found' })
 
+  const language = getSupportedLanguage(requestedLanguage || session.language)
+  const uiText = getUiText(language)
   const level = getLevelForQuestion(questionId)
 
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 300,
-      system: EVAL_SYSTEM,
+      system: buildEvalSystem(language),
       messages: [{
         role: 'user',
         content: JSON.stringify({
@@ -57,10 +73,13 @@ export default async function handler(req, res) {
       const clean = raw.replace(/```json|```/g, '').trim()
       evaluation = JSON.parse(clean)
     } catch {
-      evaluation = { score: 0, studentFeedback: 'Thank you for your answer.', adminNote: 'Evaluation parsing failed.' }
+      evaluation = {
+        score: 0,
+        studentFeedback: uiText.api.evaluationStudentFallback,
+        adminNote: uiText.api.evaluationAdminFallback,
+      }
     }
 
-    // Store in session
     const updatedScores = { ...session.scores, [questionId]: evaluation.score }
     const updatedAdminNotes = { ...session.adminNotes, [questionId]: evaluation.adminNote }
     const updatedStudentFeedback = { ...session.studentFeedback, [questionId]: evaluation.studentFeedback }
@@ -71,6 +90,7 @@ export default async function handler(req, res) {
       adminNotes: updatedAdminNotes,
       studentFeedback: updatedStudentFeedback,
       responses: updatedResponses,
+      language,
     })
 
     res.status(200).json(evaluation)
