@@ -18,6 +18,9 @@ LANGUAGE:
 - The student session language is ${languageName}.
 - The student may still answer in either English or Portuguese. Evaluate meaning, not exact wording.
 - Return both studentFeedback and adminNote in ${languageName}.
+- Keep studentFeedback natural and conversational, not overly polite or formal.
+- Do NOT thank the student in per-question feedback.
+- If writing in Portuguese, do NOT use "obrigado(a)". Avoid gendered gratitude entirely in per-question feedback.
 
 SCORING RUBRIC:
 - Score 0: Incorrect, blank, or off-topic. Response does not address the question.
@@ -31,7 +34,7 @@ For Apply-level questions (IDs starting with A):
 OUTPUT: Return ONLY valid JSON, no preamble, no markdown.
 {
   "score": 0 | 1 | 2,
-  "studentFeedback": "one warm brief sentence for the student",
+  "studentFeedback": "one brief, natural sentence for the student without thanking them",
   "adminNote": "one sentence on reasoning quality for the administrator"
 }`
 }

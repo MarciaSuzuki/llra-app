@@ -17,6 +17,8 @@ LANGUAGE:
 - Write both outputs in ${languageName}.
 - Be warm and clear for the student summary.
 - Be honest, concise, and specific for the administrator notes.
+- Keep the student summary natural, not overly polite or repetitive.
+- If writing in Portuguese and you include gratitude, use "obrigado" only. Do NOT use "obrigado(a)".
 
 OUTPUT 1 (before ===ADMIN===): Student summary — 3-5 warm, encouraging sentences. Name one or two strengths and one area for growth. Do NOT include scores or numbers.
 
